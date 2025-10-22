@@ -53,6 +53,13 @@ interface IAdDividend is IERC20 {
     function mint(address to, uint256 amount) external;
 }
 
+/**
+ * @title RWA3
+ * @author [Your Name or Organization]
+ * @notice This contract manages real-world ad positions as NFTs and handles ad rentals with dividend distributions.
+ * @dev Extends ERC1155 for NFT ad positions, Ownable for ownership, and ReentrancyGuard for security against reentrancy attacks.
+ * @custom:security-contact hopeallgood.unadvised619@passinbox.com
+ */
 contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     using Counters for Counters.Counter;
     using Strings for uint256;
@@ -222,7 +229,6 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     error InvalidInitialStatus();
     error IncorrectDeposit();
     error NotAuthorized();
-    error TimeWindowExpired();
     error AlreadyRented();
     error InsufficientBalance();
     error InvalidRating();
@@ -233,7 +239,6 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     error NotSpaceOwner();
     error NotAdRenter();
     error InvalidStatus();
-    error TimeWindowNotExpired();
     error TransferFailed();
 
     /**
@@ -276,6 +281,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows users to create a new ad position NFT
      * @dev Creates a new ad position NFT
      * @param _dealPrice The deal price in wei
      * @param _adLength The length of the ad position
@@ -321,6 +327,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows the space owner to edit an existing ad position
      * @dev Edits an existing ad position
      * @param _adId The ID of the ad to edit
      * @param _dealPrice New deal price
@@ -356,6 +363,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Retrieves the details of an ad
      * @dev Returns the details of an ad
      * @param _adId The ID of the ad
      * @return Ad memory The ad details
@@ -365,6 +373,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows users to rent an ad position by paying the deal price
      * @dev Rents an ad position
      * @param _adId The ID of the ad to rent
      */
@@ -381,6 +390,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Confirms an ad rental and mints dividend tokens to owner and renter
      * @dev Confirms an ad rental and mints dividend tokens
      * @param _adId The ID of the ad to confirm
      */
@@ -403,6 +413,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows the renter to freeze an active ad by paying a freeze fee
      * @dev Freezes an active ad rental
      * @param _adId The ID of the ad to freeze
      */
@@ -422,6 +433,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows the owner to unfreeze a frozen ad and distribute funds
      * @dev Unfreezes a frozen ad and distributes funds
      * @param _adId The ID of the ad to unfreeze
      */
@@ -431,7 +443,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Internal function to handle unfreeze logic
+     * @dev Internal function to handle unfreeze logic and fund distribution
      * @param ad The ad storage reference
      */
     function _unfreezeInternal(Ad storage ad) private {
@@ -456,6 +468,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows authorized users to finish an active ad deal and distribute funds
      * @dev Finishes an active ad deal and distributes funds
      * @param _adId The ID of the ad to finish
      */
@@ -490,7 +503,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Internal function to clean ad rental data
+     * @dev Internal function to clean ad rental data after completion or unfreeze
      * @param ad The ad storage reference
      */
     function _cleanAd(Ad storage ad) private {
@@ -501,6 +514,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows users to rate an ad position (1-5 stars)
      * @dev Rates an ad position
      * @param _adId The ID of the ad to rate
      * @param _rating The rating (1-5)
@@ -521,6 +535,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Transfers ownership of an ad NFT to a new owner
      * @dev Transfers ownership of an ad NFT
      * @param _adId The ID of the ad
      * @param _newOwner The new owner address
@@ -532,6 +547,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Allows the contract owner to withdraw any stuck funds
      * @dev Withdraws stuck funds (only contract owner)
      */
     function withdraw() external onlyOwner nonReentrant {
@@ -541,20 +557,12 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Updates the address that receives platform fees
      * @dev Updates the fee address (only contract owner)
      * @param _newFeeTo The new fee address
      */
     function updateFeeTo(address _newFeeTo) external onlyOwner {
         adListFeeTo = _newFeeTo;
         emit FeeToUpdated(_newFeeTo);
-    }
-
-    /**
-     * @dev Checks if the contract supports an interface
-     * @param interfaceId The interface ID
-     * @return bool True if supported
-     */
-    function supportsInterface(bytes4 interfaceId) external view override(ERC1155) returns (bool) {
-        return super.supportsInterface(interfaceId);
     }
 }
