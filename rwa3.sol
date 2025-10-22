@@ -9,7 +9,7 @@ import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
-* @title Real World Asset - Real World Advertisement - Real World Attention
+* @title Real World Ad - Real World Asset - Real World Attention
 * @notice Decentralized platform for managing real-world ad positions as NFTs and dividend tokens
 * @dev This contract implements ERC1155 for multi-token support, with NFTs for ad positions and FT for dividends. It handles rental, confirmation, freezing, and finishing of ad deals with fee distributions.
     * Service Flow / 服務流程
@@ -205,11 +205,6 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     uint256 public constant FEE_PERCENT = 10; // 10%
 
     /**
-     * @dev Constant for the freeze fee percentage
-     */
-    uint256 public constant FREEZE_FEE_PERCENT = 10; // For freeze
-
-    /**
      * @dev Constant for the unfreeze owner share percentage
      */
     uint256 public constant UNFREEZE_OWNER_SHARE = 40; // 40%
@@ -403,8 +398,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
 
         // Simplified: 10% of dealPrice in AD units (assuming 1:1 wei to AD wei equivalence)
         uint256 adAmount = ad.dealPrice * FEE_PERCENT / 100;
-        adToken.mint(ad.spaceUser, adAmount / 2); // Mint to renter
-        adToken.mint(ad.spaceOwner, adAmount / 2); // Mint to owner
+        adToken.mint(_msgSender(), adAmount); // Mint to confirm address
 
         ad.status = AdStatus.Hosting;
         ad.dealTime = block.timestamp;
@@ -422,7 +416,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
         // withinTimeWindow uses revert, so call manually
         if (block.timestamp > ad.dealTime + FREEZE_WINDOW) revert FreezeWindowExpired();
 
-        uint256 freezeFee = ad.dealPrice * FREEZE_FEE_PERCENT / 100;
+        uint256 freezeFee = ad.dealPrice * FEE_PERCENT / 100;
         if (msg.value != freezeFee) revert IncorrectDeposit();
 
         (bool success, ) = payable(adListFeeTo).call{value: freezeFee}("");
@@ -490,6 +484,9 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
 
         uint256 ownerShare = total * 90 / 100;
         uint256 feeShare = total * FEE_PERCENT / 100;
+        uint256 adAmount = total * 50 / 100;
+        adToken.mint(ad.spaceOwner, adAmount);
+        adToken.mint(ad.spaceUser, adAmount);
 
         (bool success1, ) = payable(ad.spaceOwner).call{value: ownerShare}("");
         if (!success1) revert TransferFailed();
