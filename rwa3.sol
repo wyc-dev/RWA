@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
+import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
 * @title Real World Asset - Real World Advertisement - Real World Attention
@@ -42,9 +42,14 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
 * @dev Interface for the external AD ERC20 token
+* @custom:security-contact hopeallgood.unadvised619@passinbox.com
 */
-
 interface IAdDividend is IERC20 {
+    /**
+     * @dev Mints new AD tokens to the specified address
+     * @param to The recipient address
+     * @param amount The amount to mint
+     */
     function mint(address to, uint256 amount) external;
 }
 
@@ -84,7 +89,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     /**
      * @dev Mapping from ad ID to ad details
      */
-    mapping(uint256 => Ad) public ads;
+    mapping(uint256 adId => Ad adDetails) public ads;
 
     /**
      * @dev Address to receive platform fees
@@ -95,12 +100,6 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @dev The AD token contract address
      */
     IAdDividend public adToken;
-
-    // Token IDs
-    /**
-     * @dev Constant ID for the Ad Dividend fungible token
-     */
-    uint256 public constant AD_TOKEN_ID = 0; // ERC20-like: Ad Dividend (unlimited supply)
 
     // Events
     /**
@@ -170,6 +169,20 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     event AdCleaned(uint256 indexed adId);
 
     /**
+     * @dev Emitted when the fee address is updated
+     * @param newFeeTo The new fee address
+     */
+    event FeeToUpdated(address indexed newFeeTo);
+
+    /**
+     * @dev Emitted when an ad ownership is transferred
+     * @param adId The ID of the ad
+     * @param from The previous owner
+     * @param to The new owner
+     */
+    event AdOwnershipTransferred(uint256 indexed adId, address indexed from, address indexed to);
+
+    /**
      * @dev Constant for the confirmation time window
      */
     uint256 public constant CONFIRM_WINDOW = 24 hours;
@@ -207,7 +220,6 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     // Custom errors for gas efficiency
     error InvalidGeography();
     error InvalidInitialStatus();
-    error AdNotFound();
     error IncorrectDeposit();
     error NotAuthorized();
     error TimeWindowExpired();
@@ -217,8 +229,12 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     error CannotEditImmutable();
     error NotHosting();
     error FreezeWindowExpired();
-    error BurningNotAllowed();
     error NotAdOwner(); // For ERC1155 balance check
+    error NotSpaceOwner();
+    error NotAdRenter();
+    error InvalidStatus();
+    error TimeWindowNotExpired();
+    error TransferFailed();
 
     /**
      * @dev Modifier to restrict access to the space owner of the ad
@@ -226,7 +242,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      */
     modifier onlySpaceOwner(uint256 adId) {
         if (balanceOf(_msgSender(), adId) != 1) revert NotAdOwner();
-        require(ads[adId].spaceOwner == _msgSender(), "Not space owner");
+        if (ads[adId].spaceOwner != _msgSender()) revert NotSpaceOwner();
         _;
     }
 
@@ -235,7 +251,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @param adId The ID of the ad
      */
     modifier onlySpaceUser(uint256 adId) {
-        require(ads[adId].spaceUser == _msgSender(), "Not ad renter");
+        if (ads[adId].spaceUser != _msgSender()) revert NotAdRenter();
         _;
     }
 
@@ -245,27 +261,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @param requiredStatus The required status
      */
     modifier validStatus(uint256 adId, AdStatus requiredStatus) {
-        require(uint8(ads[adId].status) == uint8(requiredStatus), "Invalid status");
-        _;
-    }
-
-    /**
-     * @dev Modifier to check if the current time is within a window
-     * @param startTime The start timestamp
-     * @param window The time window duration
-     */
-    modifier withinTimeWindow(uint256 startTime, uint256 window) {
-        if (block.timestamp > startTime + window) revert TimeWindowExpired();
-        _;
-    }
-
-    /**
-     * @dev Modifier to check if the current time is after a window
-     * @param startTime The start timestamp
-     * @param window The time window duration
-     */
-    modifier afterTimeWindow(uint256 startTime, uint256 window) {
-        require(block.timestamp > startTime + window, "Time window not expired");
+        if (uint8(ads[adId].status) != uint8(requiredStatus)) revert InvalidStatus();
         _;
     }
 
@@ -276,6 +272,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     constructor(address _adTokenAddress) ERC1155("ipfs://Qm.../{id}.json") Ownable(_msgSender()) {
         adToken = IAdDividend(_adTokenAddress);
         adListFeeTo = _msgSender();
+        emit FeeToUpdated(_msgSender());
     }
 
     /**
@@ -417,7 +414,8 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
         uint256 freezeFee = ad.dealPrice * FREEZE_FEE_PERCENT / 100;
         if (msg.value != freezeFee) revert IncorrectDeposit();
 
-        payable(adListFeeTo).transfer(freezeFee);
+        (bool success, ) = payable(adListFeeTo).call{value: freezeFee}("");
+        if (!success) revert TransferFailed();
         ad.status = AdStatus.Freeze;
 
         emit AdFrozen(_adId, _msgSender());
@@ -436,7 +434,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @dev Internal function to handle unfreeze logic
      * @param ad The ad storage reference
      */
-    function _unfreezeInternal(Ad storage ad) internal {
+    function _unfreezeInternal(Ad storage ad) private {
         uint256 total = ad.dealPrice;
         if (address(this).balance < total) revert InsufficientBalance();
 
@@ -445,13 +443,16 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
         uint256 feeShare = total * UNFREEZE_FEE_SHARE / 100;
         // Remaining 15% stays in contract as per spec implication (penalty/platform reserve)
 
-        payable(ad.spaceOwner).transfer(ownerShare);
-        payable(ad.spaceUser).transfer(renterShare);
-        payable(adListFeeTo).transfer(feeShare);
+        (bool success1, ) = payable(ad.spaceOwner).call{value: ownerShare}("");
+        if (!success1) revert TransferFailed();
+        (bool success2, ) = payable(ad.spaceUser).call{value: renterShare}("");
+        if (!success2) revert TransferFailed();
+        (bool success3, ) = payable(adListFeeTo).call{value: feeShare}("");
+        if (!success3) revert TransferFailed();
 
         ad.status = AdStatus.Closed;
         _cleanAd(ad);
-        emit AdUnfrozen(ad.adId, ad.spaceUser);
+        emit AdUnfrozen(ad.adId, _msgSender());
     }
 
     /**
@@ -477,8 +478,10 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
         uint256 ownerShare = total * 90 / 100;
         uint256 feeShare = total * FEE_PERCENT / 100;
 
-        payable(ad.spaceOwner).transfer(ownerShare);
-        payable(adListFeeTo).transfer(feeShare);
+        (bool success1, ) = payable(ad.spaceOwner).call{value: ownerShare}("");
+        if (!success1) revert TransferFailed();
+        (bool success2, ) = payable(adListFeeTo).call{value: feeShare}("");
+        if (!success2) revert TransferFailed();
 
         ad.status = AdStatus.Closed;
         _cleanAd(ad);
@@ -490,7 +493,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @dev Internal function to clean ad rental data
      * @param ad The ad storage reference
      */
-    function _cleanAd(Ad storage ad) internal {
+    function _cleanAd(Ad storage ad) private {
         ad.spaceUser = address(0);
         ad.dealTime = 0;
         ad.status = AdStatus.Waiting;
@@ -525,13 +528,16 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
     function transferOwnership(uint256 _adId, address _newOwner) external onlySpaceOwner(_adId) {
         safeTransferFrom(_msgSender(), _newOwner, _adId, 1, "");
         ads[_adId].spaceOwner = _newOwner;
+        emit AdOwnershipTransferred(_adId, _msgSender(), _newOwner);
     }
 
     /**
      * @dev Withdraws stuck funds (only contract owner)
      */
     function withdraw() external onlyOwner nonReentrant {
-        payable(owner()).transfer(address(this).balance);
+        uint256 balance = address(this).balance;
+        (bool success, ) = payable(owner()).call{value: balance}("");
+        if (!success) revert TransferFailed();
     }
 
     /**
@@ -540,6 +546,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      */
     function updateFeeTo(address _newFeeTo) external onlyOwner {
         adListFeeTo = _newFeeTo;
+        emit FeeToUpdated(_newFeeTo);
     }
 
     /**
@@ -547,7 +554,7 @@ contract RWA3 is ERC1155, Ownable, ReentrancyGuard {
      * @param interfaceId The interface ID
      * @return bool True if supported
      */
-    function supportsInterface(bytes4 interfaceId) public view override(ERC1155) returns (bool) {
+    function supportsInterface(bytes4 interfaceId) external view override(ERC1155) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }
